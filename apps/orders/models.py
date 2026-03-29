@@ -1,3 +1,4 @@
+import datetime
 import uuid
 
 from django.conf import settings
@@ -36,7 +37,11 @@ class Order(models.Model):
         blank=True,
         unique=True,
     )
-    order_number = models.CharField(max_length=20, unique=True)
+    order_number = models.CharField(
+        max_length=20,
+        unique=True,
+        blank=True,
+    )
     channel = models.CharField(max_length=20, choices=Channel.choices)
     status = models.CharField(
         max_length=20,
@@ -68,8 +73,25 @@ class Order(models.Model):
         ]
         ordering = ["-created_at"]
 
+    def save(self, *args, **kwargs):
+        if not self.order_number:
+            today = datetime.date.today()
+            prefix = today.strftime("%Y%m%d")
+            last = (
+                Order.objects.filter(order_number__startswith=prefix)
+                .order_by("order_number")
+                .last()
+            )
+            if last:
+                last_seq = int(last.order_number[-4:])
+                seq = str(last_seq + 1).zfill(4)
+            else:
+                seq = "0001"
+            self.order_number = f"{prefix}-{seq}"
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return self.order_number
+        return self.order_number or str(self.pk)
 
 
 class OrderItem(models.Model):
@@ -94,3 +116,35 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"{self.name} x{self.quantity}"
+
+
+class OrderItemAddOn(models.Model):
+    """
+    Snapshot of a selected AddOnOption at order time.
+    Name and price are copied from AddOnOption at the moment
+    the order is placed — never reference AddOnOption live
+    after this point. This keeps historical bills accurate
+    even if the addon name or price changes later.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order_item = models.ForeignKey(
+        OrderItem,
+        on_delete=models.CASCADE,
+        related_name="addons",
+    )
+    addon_option = models.ForeignKey(
+        "menu.AddOnOption",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=100)
+    additional_price = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=0.00,
+    )
+
+    def __str__(self):
+        return f"{self.name} (+₹{self.additional_price})"

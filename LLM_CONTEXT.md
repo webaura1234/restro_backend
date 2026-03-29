@@ -11,6 +11,7 @@ Copy this file (or the whole `restro_backend/` tree excluding `.venv`) when onbo
 - **Custom user model:** `accounts.User` (email login, roles: manager / captain / kitchen).
 - **Branding (logos, themes)** is intended to live in the **frontend**. `RestaurantConfig` holds **operational** venue data only (name, contact, address, tax, currency, timezone).
 - **Secrets** (Razorpay, Swiggy, Zomato keys, commissions) are read from **environment variables** via `config/settings/base.py` — **not** stored on `RestaurantConfig`. Payment rows **snapshot** commission at transaction time (see `Payment`).
+- **No `audit` app (MVP):** structured audit logging was removed to reduce scope. Add a dedicated app later or rely on server / reverse-proxy logs for accountability if needed.
 
 ---
 
@@ -50,8 +51,7 @@ restro_backend/
     ├── sessions/           # app label: table_sessions — TableSession
     ├── orders/             # Order, OrderItem
     ├── billing/            # Bill, Payment
-    ├── analytics/          # DailyAnalytics, ItemAnalytics
-    └── audit/              # AuditLog
+    └── analytics/          # DailyAnalytics, ItemAnalytics
 ```
 
 **Removed earlier:** `apps/integrations`. **No** `apps/venue/env.py` — use `django.conf.settings` for keys.
@@ -122,7 +122,7 @@ restro_backend/
 ### `billing` (label `billing`)
 
 - **`Bill`** — **OneToOne** **`table_sessions.TableSession`**, totals, `tip_amount`, `amount_paid`, `status`, FK **`User`** `locked_by`, `locked_at`, timestamps
-- **`Payment`** — FK **`Bill`**, `amount`, `method`, `gateway`, **`commission_pct`**, **`commission_amount`**, **`net_settlement`** (snapshot at payment time; dine-in typically 0 / amount), **`razorpay_order_id`**, **`razorpay_payment_id`**, **`razorpay_signature`** (nullable — HMAC verification / audit), `status`, FK **`User`** `collected_by`, timestamps
+- **`Payment`** — FK **`Bill`**, `amount`, `method`, `gateway`, **`commission_pct`**, **`commission_amount`**, **`net_settlement`** (snapshot at payment time; dine-in typically 0 / amount), **`razorpay_order_id`**, **`razorpay_payment_id`**, **`razorpay_signature`** (nullable — HMAC verification), `status`, FK **`User`** `collected_by`, timestamps
 
 ### `analytics` (label `analytics`)
 
@@ -130,24 +130,20 @@ restro_backend/
 - **`ItemAnalytics`** — FK **`menu.MenuItem`**, `date`, `quantity_sold`, `revenue`; unique `(menu_item, date)`  
   *(Margin reporting can use `MenuItem.cost_price` vs revenue; no `margin_amount` column on this model currently.)*
 
-### `audit` (label `audit`)
-
-- **`AuditLog`** — FK **`User`** (nullable), `action`, `entity_type`, `entity_id` (UUID), `old_value`/`new_value` JSON, **`ip_address`** (nullable — QR exploit / accountability), `timestamp`
-
 ### Relationship summary
 
 ```
 RestaurantConfig (standalone singleton)
 Table ← TableSession → Order (optional session) → OrderItem → MenuItem → Category
 TableSession 1:1 Bill → Payment
-User ← captain, confirmed_by, locked_by, collected_by, audit user
+User ← captain, confirmed_by, locked_by, collected_by
 ```
 
 ---
 
 ## 7. Migrations
 
-Apps progressed through initial migrations, a trim (`0002_*`), and **feature migrations (`0003_*`)** restoring operational fields (menu, orders, billing, venue table enums, sessions notes, audit IP, payment gateway columns).  
+Apps progressed through initial migrations, trims, and feature migrations (menu, orders, billing, venue, sessions, etc.). The **`audit` app was removed** for MVP (run `python manage.py migrate audit zero` on older databases before deleting the app code, then remove `apps.audit` from `INSTALLED_APPS`).  
 Run: `python manage.py migrate`
 
 ---
